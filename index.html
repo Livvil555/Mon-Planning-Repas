@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Planning repas</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#faf8f4;--card:#fff;--tx:#2b2b2b;--mut:#777;--ac:#3f7d5c;--bd:#e3ded4;--chip:#e6f1ea}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1c1d1c;--card:#262826;--tx:#eee;--mut:#9a9a9a;--ac:#6fbf94;--bd:#3a3d3a;--chip:#2f4238}}
+:root[data-theme="dark"]{--bg:#1c1d1c;--card:#262826;--tx:#eee;--mut:#9a9a9a;--ac:#6fbf94;--bd:#3a3d3a;--chip:#2f4238}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;padding:12px;max-width:900px;margin:auto}
+h1{font-size:1.3rem;margin:4px 0 10px}
+nav{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+button,select,input,textarea{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:6px 10px}
+button{cursor:pointer}
+button.on,button.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 12px;margin-bottom:10px}
+.day h3{margin:0 0 6px;font-size:1rem;text-transform:capitalize}
+.row{display:flex;gap:8px;align-items:flex-start;margin:6px 0;flex-wrap:wrap}
+.lab{width:78px;color:var(--mut);font-size:.85rem;padding-top:7px}
+.cell{flex:1;min-width:180px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.chip{background:var(--chip);border-radius:14px;padding:3px 6px 3px 10px;font-size:.9rem;display:inline-flex;gap:4px;align-items:center}
+.chip b{cursor:pointer;color:var(--mut);padding:0 4px}
+.cell select{max-width:150px;padding:4px 6px;font-size:.9rem}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+textarea{width:100%;min-height:110px}
+.mut{color:var(--mut);font-size:.85rem}
+li{margin:4px 0}
+.hide{display:none}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}.grid .card{margin:0}.tot{font-weight:400;font-size:.8rem;color:var(--mut)}.pb{background:var(--chip);border-radius:6px;height:10px}.pb i{display:block;background:var(--ac);height:10px;border-radius:6px}
+</style></head><body>
+<h1>🍽️ Planning repas</h1>
+<nav id="nav"></nav>
+<div id="v-plan"></div><div id="v-rec" class="hide"></div><div id="v-shop" class="hide"></div><div id="v-stats" class="hide"></div><div id="v-save" class="hide"></div>
+<script>
+const MOIS=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+const SLOTS=[["matin","Matin"],["midi","Midi"],["gouter","Goûter / en-cas"],["soir","Soir"]];
+const KEY="planning-repas-v1";
+let S={recipes:{"Œufs au plat":["2 œufs"],"Kéfir":["200 ml kéfir"],"Purée de patate douce":["300 g patate douce","1 c. à s. huile d'olive"],"Saumon":["150 g saumon"]},plan:{},cats:{}};
+try{const r=localStorage.getItem(KEY);if(r)S=JSON.parse(r)}catch(e){}
+const norm=()=>{S.cats??={};S.meta??={};S.notes??={};S.stock??="";S.people??=1};norm();
+const now=new Date();let Y=now.getFullYear(),M=now.getMonth(),tab="plan",shop=null,mode="mois",TF="";
+const mon=d=>{const x=new Date(d);x.setHours(12);x.setDate(x.getDate()-((x.getDay()+6)%7));return x};let WS=mon(now);
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const $=id=>document.getElementById(id);
+const iso=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const names=()=>Object.keys(S.recipes).sort((a,b)=>a.localeCompare(b,"fr"));
+
+function nav(){
+ $("nav").innerHTML=[["plan","📅 Planning"],["rec","📖 Recettes"],["shop","🛒 Courses"],["stats","📊 Stats"],["save","💾 Sauvegarde"]].map(([k,l])=>`<button class="${tab===k?"on":""}" onclick="go('${k}')">${l}</button>`).join("");
+ ["plan","rec","shop","stats","save"].forEach(k=>$("v-"+k).classList.toggle("hide",k!==tab));
+}
+function go(k){tab=k;nav();({plan:rPlan,rec:rRec,shop:rShop,stats:rStats,save:rSave})[k]()}
+const tagsOf=r=>(S.meta[r]?.tags||"").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean);
+const fav=r=>S.meta[r]?.fav?1:0;
+const mb=()=>`<button onclick="mv(-1)">◀</button><select onchange="M=+this.value;go(tab)">${MOIS.map((m,i)=>`<option value="${i}" ${i===M?"selected":""}>${m}</option>`).join("")}</select><input type="number" value="${Y}" style="width:90px" onchange="Y=+this.value;go(tab)"><button onclick="mv(1)">▶</button>`;
+const dayList=()=>mode=="semaine"?[...Array(7)].map((_,i)=>new Date(WS.getFullYear(),WS.getMonth(),WS.getDate()+i)):[...Array(new Date(Y,M+1,0).getDate())].map((_,i)=>new Date(Y,M,i+1));
+const tot=(k,f)=>SLOTS.reduce((a,[s])=>a+((S.plan[k]||{})[s]||[]).reduce((b,r)=>b+(+(S.meta[r]||{})[f]||0),0),0);
+function rPlan(){
+ const tags=[...new Set(names().flatMap(tagsOf))];
+ const O=names().filter(r=>!TF||tagsOf(r).includes(TF)).sort((a,b)=>fav(b)-fav(a)).map(r=>`<option value="${esc(r)}">${fav(r)?"★ ":""}${esc(r)}</option>`).join("");
+ const nv=mode=="semaine"?`<button onclick="WS.setDate(WS.getDate()-7);rPlan()">◀</button><span>Semaine du ${WS.toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}</span><button onclick="WS.setDate(WS.getDate()+7);rPlan()">▶</button>`:mb();
+ let h=`<div class="bar"><select onchange="mode=this.value;rPlan()"><option value="mois" ${mode=="mois"?"selected":""}>Vue mois</option><option value="semaine" ${mode=="semaine"?"selected":""}>Vue semaine</option></select>${nv}<select onchange="TF=this.value;rPlan()"><option value="">Toutes étiquettes</option>${tags.map(t=>`<option ${t==TF?"selected":""}>${esc(t)}</option>`).join("")}</select></div>
+ <details class="card"><summary>Copier une semaine</summary><div class="row">De la semaine du <input type="date" id="cf" value="${iso(WS)}"> vers celle du <input type="date" id="ct"><button onclick="cpWeek()">Copier</button></div></details><div class="${mode=="semaine"?"grid":""}">`;
+ for(const dt of dayList()){
+  const k=iso(dt),p=S.plan[k]||{},kc=tot(k,"kcal"),pr=tot(k,"prot");
+  h+=`<div class="card day"><h3>${dt.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric"})} <span class="tot">${kc?kc+" kcal ":""}${pr?pr+" g prot.":""}</span></h3>`+SLOTS.map(([s,l])=>`<div class="row"><div class="lab">${l}</div><div class="cell">${(p[s]||[]).map((r,i)=>`<span class="chip">${esc(r)}<b onclick="rm('${k}','${s}',${i})">×</b></span>`).join("")}<input list="dl" placeholder="+ choisir ou taper un nom…" onchange="add('${k}','${s}',this.value)" style="width:200px"></div></div>`).join("")+`<input placeholder="Note du jour…" value="${esc(S.notes[k]||"")}" onchange="S.notes['${k}']=this.value;save()" style="width:100%;margin-top:6px"></div>`;
+ }
+ $("v-plan").innerHTML=h+`</div><datalist id="dl">${names().filter(r=>!TF||tagsOf(r).includes(TF)).sort((a,b)=>fav(b)-fav(a)).map(r=>`<option value="${esc(r)}">`).join("")}</datalist>`;
+}
+function mv(x){M+=x;if(M<0){M=11;Y--}if(M>11){M=0;Y++}go(tab)}
+function add(k,s,v){v=(v||"").trim();if(!v)return;
+ const ex=names().find(n=>n.toLowerCase()==v.toLowerCase());v=ex||v;
+ if(!ex){S.recipes[v]=[];S.meta[v]={}}
+ ((S.plan[k]??={})[s]??=[]).push(v);save();rPlan()}
+function rm(k,s,i){S.plan[k][s].splice(i,1);save();rPlan()}
+function cpWeek(){
+ const a=mon($("cf").value+"T12:00"),b=mon($("ct").value+"T12:00");
+ if(isNaN(a)||isNaN(b))return alert("Choisissez deux dates.");
+ if(!confirm("Remplacer la semaine du "+iso(b)+" ?"))return;
+ for(let i=0;i<7;i++){const f=iso(new Date(a.getFullYear(),a.getMonth(),a.getDate()+i)),t=iso(new Date(b.getFullYear(),b.getMonth(),b.getDate()+i));
+  if(S.plan[f])S.plan[t]=JSON.parse(JSON.stringify(S.plan[f]));else delete S.plan[t]}
+ save();rPlan();
+}
+
+let editing=null;
+function rRec(){
+ const e=editing,m=e?S.meta[e]||{}:{};
+ $("v-rec").innerHTML=`<div class="card"><b>🔎 Chercher une recette en ligne</b> <span class="mut">(TheMealDB, en anglais)</span><div class="row"><input id="sq" placeholder="ex : salmon, chicken, pasta…" style="flex:1" onkeydown="if(event.key==='Enter')srch()"><button class="pri" onclick="srch()">Chercher</button></div><div id="sr" class="mut"></div></div><div class="card"><b>${e?"Modifier":"Nouvelle"} recette</b>
+ <div class="row"><input id="rn" placeholder="Nom de la recette" value="${e?esc(e):""}" style="flex:1"><label><input type="checkbox" id="rf" ${m.fav?"checked":""}> ★ Favori</label></div>
+ <div class="row"><input id="rk" type="number" placeholder="kcal / pers." value="${m.kcal||""}" style="width:120px"><input id="rp" type="number" placeholder="Protéines (g)" value="${m.prot||""}" style="width:120px"><input id="rt" placeholder="Étiquettes : rapide, végé…" value="${esc(m.tags||"")}" style="flex:1"></div>
+ <textarea id="ri" placeholder="Ingrédients pour 1 personne, un par ligne :\n200 g saumon\n2 œufs">${e?esc(S.recipes[e].join("\n")):""}</textarea>
+ <div class="row"><button class="pri" onclick="saveRec()">Enregistrer</button>${e?`<button onclick="editing=null;rRec()">Annuler</button>`:""}</div>
+ <div class="mut">Écrivez les quantités pour 1 personne : le nombre de personnes se règle dans l'onglet Courses.</div></div>`+
+ names().sort((a,b)=>fav(b)-fav(a)).map(r=>{const q=S.meta[r]||{};return `<div class="card"><b>${fav(r)?"★ ":""}${esc(r)}</b> <button onclick="editing=this.dataset.n;rRec();scrollTo(0,0)" data-n="${esc(r)}">✏️</button> <button onclick="delRec(this.dataset.n)" data-n="${esc(r)}">🗑️</button><div class="mut">${q.kcal?q.kcal+" kcal · ":""}${q.prot?q.prot+" g prot. · ":""}${esc(q.tags||"")}</div><div class="mut">${S.recipes[r].map(esc).join(" · ")||"—"}</div>${q.steps?`<details><summary>Étapes</summary><p style="white-space:pre-wrap">${esc(q.steps)}</p><a target="_blank" rel="noopener" href="https://translate.google.com/?sl=en&tl=fr&op=translate&text=${encodeURIComponent(q.steps.slice(0,4000))}">Traduire en français ↗</a></details>`:""}</div>`}).join("");
+}
+function saveRec(){
+ const n=$("rn").value.trim();if(!n)return;
+ const old={...(S.meta[editing||n]||{})};
+ const ing=$("ri").value.split("\n").map(x=>x.trim()).filter(Boolean);
+ if(editing&&editing!==n){delete S.recipes[editing];delete S.meta[editing];for(const d in S.plan)for(const s in S.plan[d])S.plan[d][s]=S.plan[d][s].map(x=>x===editing?n:x)}
+ S.recipes[n]=ing;S.meta[n]={...old,fav:$("rf").checked,kcal:+$("rk").value||0,prot:+$("rp").value||0,tags:$("rt").value.trim()};editing=null;save();rRec();
+}
+function delRec(n){if(!confirm("Supprimer « "+n+" » ?"))return;delete S.recipes[n];delete S.meta[n];save();rRec()}
+
+function rShop(){
+ const a=iso(now),b=iso(new Date(now.getTime()+6*864e5));
+ $("v-shop").innerHTML=`<div class="card"><div class="bar"><label>Du <input type="date" id="d1" value="${a}"></label><label>au <input type="date" id="d2" value="${b}"></label><label>Personnes <input type="number" id="pp" min="1" value="${S.people}" style="width:70px"></label></div>
+ <details><summary>🏠 Déjà en stock (un article par ligne)</summary><textarea id="st" placeholder="riz\nhuile d'olive\nsel">${esc(S.stock)}</textarea></details>
+ <p><button class="pri" onclick="genShop()">Générer</button></p><div id="sl" class="mut">Choisissez une période puis « Générer ».</div></div>`;
+ if(shop)genShop();
+}
+const CATS=["🥕 Fruits & légumes","🥩 Viandes","🧀 Frais & œufs","🛒 Épicerie","🥖 Boulangerie","❄️ Surgelés","🥤 Boissons","📦 Autre","🐟 Poissons","🌾 Féculents & légumineuses"];
+const KW=[[9,/patate|pomme de terre|\briz\b|pâtes|lentille|pois chiche|quinoa|avoine|flocons|boulgour|semoule|farine/i],[8,/saumon|thon|cabillaud|poisson|crevette|sardine|maquereau|truite|colin|moule|fruits de mer/i],[1,/poulet|boeuf|bœuf|porc|dinde|jambon|steak|viande|lardon|saucisse|agneau|veau|canard/i],[0,/pomme|carotte|courg|tomate|salade|oignon|ail\b|échalote|poireau|épinard|brocoli|chou|champignon|poivron|aubergine|concombre|avocat|banane|citron|orange|fraise|framboise|fruit|légume|persil|basilic|coriandre|gingembre|céleri|radis|betterave|potiron|courge|haricot vert|petit pois/i],[2,/œuf|oeuf|kéfir|kefir|yaourt|lait|fromage|beurre|crème|mozzarella|parmesan|skyr|feta|emmental/i],[4,/pain|baguette|brioche|croissant|tortilla|wrap/i],[5,/surgel|glace/i],[6,/jus|eau\b|café|thé\b|infusion|soda|vin\b|bière/i],[3,/huile|sucre|sel\b|poivre|épice|miel|conserve|sauce|vinaigre|noix|amande|chocolat|céréale|levure|bouillon/i]];
+const catOf=nm=>{const k=nm.toLowerCase();if(S.cats[k]!==undefined)return S.cats[k];for(const[c,r]of KW)if(r.test(k))return c;return 7};
+const fmt=i=>i.q?(+i.q.toFixed(2))+(i.u?" "+i.u:""):i.n>1?"×"+i.n:"";
+const parse=line=>{const m=line.match(/^(\d+(?:[.,]\d+)?)\s*(kg|g|ml|cl|l|c\. ?à ?s\.?|c\. ?à ?c\.?|càs|càc)?\s+(.+)$/i);return{q:m?parseFloat(m[1].replace(",",".")):0,u:m&&m[2]?m[2].toLowerCase():"",nm:(m?m[3]:line).trim()}};
+function setCat(n,c){S.cats[n.toLowerCase()]=+c;save();genShop()}
+function genShop(){
+ const d1=$("d1").value,d2=$("d2").value,P=+$("pp").value||1,T={};let count=0;
+ S.people=P;S.stock=$("st").value;save();
+ for(const k in S.plan){if(k<d1||k>d2)continue;
+  for(const s in S.plan[k])for(const r of S.plan[k][s]){count++;
+   for(const line of S.recipes[r]||[]){const{q,u,nm}=parse(line);const key=nm.toLowerCase()+"|"+u;(T[key]??={nm,u,q:0,n:0}).q+=q*P;T[key].n+=P}}}
+ const st=S.stock.split("\n").map(x=>x.trim().toLowerCase()).filter(Boolean);
+ const all=Object.values(T).sort((a,b)=>a.nm.localeCompare(b.nm,"fr"));
+ const items=all.filter(i=>!st.some(x=>i.nm.toLowerCase().includes(x)));
+ shop=items;
+ const groups=CATS.map((c,ci)=>[c,items.filter(x=>catOf(x.nm)===ci)]).filter(g=>g[1].length);
+ $("sl").className="";
+ $("sl").innerHTML=items.length?`<div class="mut">${count} repas · ${P} pers.${all.length>items.length?` · ${all.length-items.length} article(s) déjà en stock retiré(s)`:""}</div>`+groups.map(([c,l])=>`<h4 style="margin:14px 0 4px">${c}</h4><ul style="list-style:none;padding:0;margin:0">${l.map(i=>`<li style="display:flex;gap:6px;align-items:center;justify-content:space-between"><label><input type="checkbox"> ${fmt(i)?`<b>${fmt(i)}</b> `:""}${esc(i.nm)}</label><select data-n="${esc(i.nm)}" onchange="setCat(this.dataset.n,this.value)" style="font-size:.75rem;padding:2px 4px;max-width:120px">${CATS.map((cc,k)=>`<option value="${k}" ${catOf(i.nm)===k?"selected":""}>${cc}</option>`).join("")}</select></li>`).join("")}</ul>`).join("")+`<p><button onclick="cp()">Copier la liste</button></p><div class="mut">Article mal classé ? Changez sa catégorie, elle sera retenue.</div>`:`<span class="mut">Rien à acheter sur cette période.</span>`;
+}
+function cp(){
+ const t=CATS.map((c,ci)=>{const l=shop.filter(x=>catOf(x.nm)===ci);return l.length?c+"\n"+l.map(i=>"- "+(fmt(i)?fmt(i)+" ":"")+i.nm).join("\n"):""}).filter(Boolean).join("\n\n");
+ navigator.clipboard?.writeText(t).then(()=>alert("Liste copiée !"),()=>prompt("Copiez :",t));
+}
+function rStats(){
+ const pre=Y+"-"+String(M+1).padStart(2,"0");let meals=0,ing=0,cnt={},mc={},rc={},kc=0,pr=0,days=new Set();
+ for(const k in S.plan){if(!k.startsWith(pre))continue;
+  for(const s in S.plan[k]){const L=S.plan[k][s];if(!L.length)continue;meals++;days.add(k);const seen=new Set();
+   for(const r of L){rc[r]=(rc[r]||0)+1;kc+=+S.meta[r]?.kcal||0;pr+=+S.meta[r]?.prot||0;
+    for(const line of S.recipes[r]||[]){const c=catOf(parse(line).nm);cnt[c]=(cnt[c]||0)+1;ing++;seen.add(c)}}
+   seen.forEach(c=>mc[c]=(mc[c]||0)+1)}}
+ let h=`<div class="bar">${mb()}</div>`;
+ if(!meals){$("v-stats").innerHTML=h+`<div class="card mut">Aucun repas planifié ce mois-ci.</div>`;return}
+ const D=days.size;
+ h+=`<div class="card"><b>${D} jours planifiés · ${meals} repas</b>${kc?`<div class="mut">Moyenne : ${Math.round(kc/D)} kcal et ${Math.round(pr/D)} g de protéines par jour (recettes renseignées)</div>`:""}</div><div class="card"><b>Répartition de l'alimentation</b>`+
+ Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).map(c=>{const p=Math.round(cnt[c]/ing*100),mp=Math.round(mc[c]/meals*100);return `<div style="margin:10px 0"><div style="display:flex;justify-content:space-between"><span>${CATS[c]}</span><b>${p}%</b></div><div class="pb"><i style="width:${p}%"></i></div><div class="mut">présent dans ${mp}% des repas</div></div>`}).join("")+
+ `<div class="mut">Part calculée sur le nombre d'ingrédients : plus vos recettes sont détaillées, plus c'est fidèle.</div></div><div class="card"><b>Recettes les plus fréquentes</b><ol>${Object.keys(rc).sort((a,b)=>rc[b]-rc[a]).slice(0,5).map(r=>`<li>${esc(r)} <span class="mut">× ${rc[r]}</span></li>`).join("")}</ol></div>`;
+ $("v-stats").innerHTML=h;
+}
+
+const FR=Object.fromEntries("salmon:saumon,chicken:poulet,chicken breast:blanc de poulet,chicken thighs:cuisses de poulet,beef:bœuf,minced beef:bœuf haché,beef mince:bœuf haché,pork:porc,bacon:lard,ham:jambon,lamb:agneau,turkey:dinde,duck:canard,sausages:saucisses,prawns:crevettes,king prawns:crevettes,tuna:thon,cod:cabillaud,haddock:églefin,mussels:moules,eggs:œufs,egg:œuf,egg yolks:jaunes d'œufs,egg white:blanc d'œuf,milk:lait,butter:beurre,unsalted butter:beurre doux,cream:crème,double cream:crème épaisse,single cream:crème liquide,sour cream:crème aigre,yogurt:yaourt,greek yogurt:yaourt grec,cheese:fromage,cheddar cheese:cheddar,parmesan:parmesan,parmesan cheese:parmesan,mozzarella:mozzarella,feta:feta,flour:farine,plain flour:farine,self-raising flour:farine à levure,sugar:sucre,caster sugar:sucre en poudre,brown sugar:sucre roux,icing sugar:sucre glace,salt:sel,sea salt:sel de mer,black pepper:poivre noir,pepper:poivre,olive oil:huile d'olive,vegetable oil:huile végétale,sunflower oil:huile de tournesol,sesame oil:huile de sésame,vinegar:vinaigre,white wine vinegar:vinaigre de vin blanc,red wine vinegar:vinaigre de vin rouge,balsamic vinegar:vinaigre balsamique,soy sauce:sauce soja,honey:miel,garlic:ail,garlic clove:gousse d'ail,garlic cloves:gousses d'ail,onion:oignon,onions:oignons,red onion:oignon rouge,spring onions:oignons verts,shallots:échalotes,leek:poireau,carrots:carottes,carrot:carotte,potatoes:pommes de terre,potato:pomme de terre,sweet potato:patate douce,tomatoes:tomates,tomato:tomate,tomato puree:concentré de tomate,tomato paste:concentré de tomate,chopped tomatoes:tomates concassées,cherry tomatoes:tomates cerises,mushrooms:champignons,peppers:poivrons,red pepper:poivron rouge,green pepper:poivron vert,courgette:courgette,aubergine:aubergine,cucumber:concombre,lettuce:laitue,spinach:épinards,broccoli:brocoli,cabbage:chou,cauliflower:chou-fleur,celery:céleri,peas:petits pois,green beans:haricots verts,sweetcorn:maïs,avocado:avocat,lemon:citron,lemon juice:jus de citron,lime:citron vert,lime juice:jus de citron vert,orange:orange,apple:pomme,banana:banane,strawberries:fraises,raspberries:framboises,rice:riz,basmati rice:riz basmati,pasta:pâtes,spaghetti:spaghetti,penne:penne,noodles:nouilles,bread:pain,breadcrumbs:chapelure,oats:flocons d'avoine,lentils:lentilles,chickpeas:pois chiches,kidney beans:haricots rouges,beans:haricots,almonds:amandes,walnuts:noix,peanuts:cacahuètes,peanut butter:beurre de cacahuète,coconut milk:lait de coco,chicken stock:bouillon de poulet,beef stock:bouillon de bœuf,vegetable stock:bouillon de légumes,stock:bouillon,water:eau,white wine:vin blanc,red wine:vin rouge,parsley:persil,basil:basilic,coriander:coriandre,thyme:thym,rosemary:romarin,oregano:origan,mint:menthe,bay leaves:feuilles de laurier,bay leaf:feuille de laurier,paprika:paprika,cumin:cumin,ground cumin:cumin moulu,cinnamon:cannelle,turmeric:curcuma,chilli powder:piment en poudre,chilli:piment,ginger:gingembre,mustard:moutarde,dijon mustard:moutarde de Dijon,mayonnaise:mayonnaise,ketchup:ketchup,chocolate:chocolat,dark chocolate:chocolat noir,cocoa:cacao,vanilla extract:extrait de vanille,baking powder:levure chimique,yeast:levure,cornflour:fécule de maïs".split(",").map(x=>x.split(":")));
+const tr=t=>{const k=t.toLowerCase().trim();return FR[k]||FR[k.replace(/s$/,"")]||t.trim()};
+const UN={g:["g",1],gr:["g",1],kg:["kg",1],ml:["ml",1],l:["l",1],cl:["cl",1],tbsp:["c. à s.",1],tblsp:["c. à s.",1],tsp:["c. à c.",1],cup:["ml",240],cups:["ml",240],oz:["g",28],lb:["g",454],lbs:["g",454]};
+function conv(ms,ing){
+ const nm=tr(ing);ms=ms.trim();
+ const m=ms.match(/^(\d+\s+\d\/\d|\d+\/\d+|\d+(?:[.,]\d+)?)\s*([a-zA-Z.]*)\s*(.*)$/);
+ if(!m)return ms?`${nm} (${ms})`:nm;
+ const q=m[1].trim().split(/\s+/).reduce((a,t)=>a+(t.includes("/")?t.split("/")[0]/t.split("/")[1]:parseFloat(t.replace(",","."))),0);
+ const u=m[2].toLowerCase().replace(/\.$/,""),x=UN[u];
+ if(x)return `${+(q*x[1]).toFixed(2)} ${x[0]} ${nm}`;
+ const rest=(m[2]+" "+m[3]).trim();
+ return `${+q.toFixed(2)} ${nm}${rest?` (${rest})`:""}`;
+}
+let RES=[];
+async function srch(){
+ const q=$("sq").value.trim();if(!q)return;$("sr").textContent="Recherche…";
+ try{
+  const j=await(await fetch("https://www.themealdb.com/api/json/v1/1/search.php?s="+encodeURIComponent(q))).json();
+  RES=j.meals||[];
+  $("sr").innerHTML=RES.length?RES.map((m,i)=>`<div class="row" style="align-items:center"><img src="${esc(m.strMealThumb)}/preview" width="56" height="56" alt="" style="border-radius:8px"><b style="flex:1;color:var(--tx)">${esc(m.strMeal)}</b><button class="pri" onclick="imp1(${i})">Ajouter</button></div>`).join(""):"Aucun résultat. Essayez en anglais : chicken, salmon, pasta…";
+ }catch(e){$("sr").textContent="Recherche impossible (connexion ou service indisponible)."}
+}
+function imp1(i){
+ const m=RES[i],L=[];
+ for(let n=1;n<=20;n++){const g=(m["strIngredient"+n]||"").trim();if(g)L.push(conv(m["strMeasure"+n]||"",g))}
+ S.recipes[m.strMeal]=L;S.meta[m.strMeal]={fav:false,kcal:0,prot:0,tags:(m.strCategory||"").toLowerCase(),steps:m.strInstructions||""};
+ save();editing=m.strMeal;rRec();scrollTo(0,0);
+}
+function rSave(){
+ $("v-save").innerHTML=`<div class="card"><b>Exporter</b><p class="mut">Copiez ce texte et gardez-le dans un fichier (Notes, mail, Drive…). C'est votre sauvegarde complète.</p><textarea id="ex" readonly onclick="this.select()">${esc(JSON.stringify(S))}</textarea><div class="row"><button class="pri" onclick="const t=$('ex');t.select();navigator.clipboard?.writeText(t.value);">Copier la sauvegarde</button></div></div>
+ <div class="card"><b>Importer</b><p class="mut">Collez une sauvegarde ici, ou choisissez un fichier texte. ⚠️ Cela remplace les données actuelles.</p><textarea id="im" placeholder="Collez ici…"></textarea><div class="row"><button class="pri" onclick="imp($('im').value)">Importer</button><input type="file" accept=".json,.txt" onchange="const f=this.files[0];f&&f.text().then(imp)"></div></div>`;
+}
+function imp(t){
+ try{const o=JSON.parse(t);if(!o.recipes||!o.plan)throw 0;S=o;norm();save();alert("Sauvegarde importée ✅");go("plan")}catch(e){alert("Sauvegarde invalide.")}
+}
+go("plan");
+</script></body></html>
